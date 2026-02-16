@@ -49,6 +49,13 @@ except ImportError as exc:  # pragma: no cover - import guard
         "Set T3D_ML_ROOT to your t3d_ml checkout."
     ) from exc
 
+
+
+
+#set device first to ensure no JAX calls 
+#TODO: All these DESC/JAX calls (modify to make GPU default, throw warning and move to CPU if not available)
+from desc import set_device
+set_device(args.desc_device)
 try:
     from gx_geometry.driver import create_eik_from_desc
 except ImportError as exc:  # pragma: no cover - import guard
@@ -57,7 +64,7 @@ except ImportError as exc:  # pragma: no cover - import guard
         "Set GX_GEOMETRY_ROOT to your gx_geometry checkout."
     ) from exc
 
-from desc import set_device
+
 from desc.compat import rescale
 from desc.examples import get
 from desc.grid import LinearGrid
@@ -358,8 +365,6 @@ def main():
     output_dir: Path = args.output_dir.expanduser().resolve()
     geometry_dir = output_dir / "geometry"
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    set_device(args.desc_device)
 
     eq = build_initial_equilibrium(verbose=args.desc_verbose)
     eq = optimize_equilibrium(eq, maxiter=args.maxiter, gtol=args.gtol, verbose=args.desc_verbose)
