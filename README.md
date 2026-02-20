@@ -9,3 +9,4 @@ Use as a starting point the optimization of the reactor scale stellarator from t
 
 ### Phase0: Fixed gradient scale lengths, fixed locations
 - Idea: With fixed locations and fixed gradient scale lengths (same as Matt's paper, fprim = 0.9, tprim = 3.0), calculate heat fluxes, and simply average for a global optimization target, along with other targets/constraints from the normal DESC optimization
+- Implementation by Byounchan Jang (byoungj@umd.edu) in the `phase0` folder. See README.md in `phase0` folder for install and instructions. 
