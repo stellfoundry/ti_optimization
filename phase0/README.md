@@ -2,9 +2,26 @@
 
 ## Setup
 
-1. **Install DESC** with the `cj/itg-proxy` branch:
+## Automated install (Perlmutter)
+
+Use the helper script to install dependencies (assumes your conda env is already created and activated):
+
+```bash
+conda activate <your-existing-env>
+cd phase0
+./install.sh
+```
+
+Optional flags:
+- `--desc-dir <path>` to choose where DESC is cloned/updated (default: `phase0/DESC`)
+- `--skip-torch` to skip optional PyTorch install
+
+1. **Install DESC** with the `cj/itg-proxy` branch (manual alternative):
    ```bash
-   pip install -e /path/to/DESC
+   git clone https://github.com/PlasmaControl/DESC.git
+   cd DESC
+   git checkout cj/itg-proxy
+   pip install -e .
    ```
 
 2. **Install gx_geometry** (included in this folder):
