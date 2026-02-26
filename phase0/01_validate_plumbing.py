@@ -27,7 +27,8 @@ from desc.objectives import ITGProxy, NNITGProxy, ObjectiveFunction
 # Paths
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(SCRIPT_DIR, "data", "neural_networks")
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+DATA_DIR = os.path.join(REPO_ROOT, "data", "neural_networks")
 MODEL_DIR = os.path.join(DATA_DIR, "cyclic_invariant_models")
 MODEL_CSV = os.path.join(DATA_DIR, "deephyper_exp", "results.csv")
 

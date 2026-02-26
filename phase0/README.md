@@ -4,18 +4,19 @@
 
 ## Automated install (Perlmutter)
 
-Use the helper script to install dependencies (assumes your conda env is already created and activated):
+Use the helper script in the main directory to install dependencies:
 
 ```bash
-conda activate <your-existing-env>
-cd phase0
 ./install.sh
 ```
 
 Optional flags:
-- `--desc-dir <path>` to choose where DESC is cloned/updated (default: `phase0/DESC`)
-- `--skip-torch` to skip optional PyTorch install
+- `--desc-dir <path>` to choose where DESC is cloned/updated (default: `DESC`)
+- `--python-version <ver>` to choose the conda env Python version (default: `3.12`)
+- `--install-torch` to install optional PyTorch (default: installed)
+- `--skip-torch` to explicitly skip PyTorch (compatibility flag)
 
+This will install the following:
 1. **Install DESC** with the `cj/itg-proxy` branch (manual alternative):
    ```bash
    git clone https://github.com/PlasmaControl/DESC.git
@@ -38,11 +39,11 @@ Optional flags:
 
 All data is pre-populated:
 
-`data/neural_networks/cyclic_invariant_models/` - 507 CNN model weights
-`data/neural_networks/deephyper_exp/results.csv` - DeepHyper hyperparameters
-`data/data_for_ML/20241210-01-assembleFluxTubeTensor_allConfigs_filtered.pkl` - flux-tube geometry tensor (N, 96, 7)
-`data/data_for_ML/20241210-01-GX_results_for_fixed_gradients_allConfigs_filtered.pkl` - GX Q values (fixed gradients)
-`data/data_for_ML/20241210-01-GX_results_for_random_gradients_allConfigs_filtered.pkl` - GX Q values (random gradients)
+`../data/neural_networks/cyclic_invariant_models/` - 507 CNN model weights
+`../data/neural_networks/deephyper_exp/results.csv` - DeepHyper hyperparameters
+`../data/data_for_ML/20241210-01-assembleFluxTubeTensor_allConfigs_filtered.pkl` - flux-tube geometry tensor (N, 96, 7)
+`../data/data_for_ML/20241210-01-GX_results_for_fixed_gradients_allConfigs_filtered.pkl` - GX Q values (fixed gradients)
+`../data/data_for_ML/20241210-01-GX_results_for_random_gradients_allConfigs_filtered.pkl` - GX Q values (random gradients)
 
 ## Scripts
 
