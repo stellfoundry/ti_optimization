@@ -29,6 +29,7 @@ from desc.utils import safediv
 # Add gx_geometry to path and import
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, os.path.join(SCRIPT_DIR, "gx_geometry"))
 from gx_geometry import (
     add_gx_definitions,
@@ -40,7 +41,7 @@ from gx_geometry import (
 # ---------------------------------------------------------------------------
 # Paths (relative to this script)
 # ---------------------------------------------------------------------------
-DATA_DIR = os.path.join(SCRIPT_DIR, "data", "neural_networks")
+DATA_DIR = os.path.join(REPO_ROOT, "data", "neural_networks")
 MODEL_DIR = os.path.join(DATA_DIR, "cyclic_invariant_models")
 MODEL_CSV = os.path.join(DATA_DIR, "deephyper_exp", "results.csv")
 OUTPUT_DIR = os.path.join(SCRIPT_DIR, "output")
