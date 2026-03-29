@@ -2,7 +2,15 @@
 Optimizing for ion temperature using GX AI surrogate
 
 ## INSTALLATION
-Currently simply run `source install.sh`. This will create the conda env and install the needed repos including downloading the custom DESC branch and the neural network model weights. 
+Currently simply run `source install.sh`. This will create the conda env, install the needed repos, build GX on Perlmutter, and download the neural network model weights. The installer now checks out DESC only from `https://github.com/rmchurch/DESC.git` on the `rmchurch/ti-opt` branch. That integration branch combines `byoungj/DESC:cj/itg-proxy` with `PlasmaControl/DESC:yge/gx`.
+
+The installer keeps JAX on pip-managed CUDA wheels and builds GX against the Perlmutter CUDA/MPI/NetCDF modules. That split only works cleanly if GX is launched in its own subprocess environment. The repo includes [`gx-launch.sh`](/global/cfs/projectdirs/m4505/rchurchi/ti_optimization/gx-launch.sh) for that purpose. If you use the DESC GX external objective, pass:
+
+```python
+launch_cmd=["/path/to/ti_optimization/gx-launch.sh"]
+```
+
+with `exec` pointing at the built GX executable, typically `/path/to/ti_optimization/gx/gx`.
 
 <!-- Currently don't need this till later phases. 
 Follow instructions for installing the AI GX version of T3D https://bitbucket.org/rmc256/t3d/src/ml/README.md -->
