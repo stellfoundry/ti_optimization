@@ -30,7 +30,7 @@ from desc.utils import safediv
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
-sys.path.insert(0, os.path.join(SCRIPT_DIR, "gx_geometry"))
+sys.path.insert(0, os.path.join(REPO_ROOT, "gx_geometry"))
 from gx_geometry import (
     add_gx_definitions,
     desc_fieldline_specified_length,

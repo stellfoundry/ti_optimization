@@ -65,10 +65,10 @@ for n in range(2, 3):
     print("====================================")
     objective = ObjectiveFunction(
         (
-            # QuasisymmetryTwoTerm(
-            #     eq=eqfam[-1], helicity=(1, 0), grid=qs_grid,
-            #     normalize=False, weight=10.0,
-            # ),
+            QuasisymmetryTwoTerm(
+                eq=eqfam[-1], helicity=(1, 0), grid=qs_grid,
+                normalize=False, weight=0.1,
+            ),
             NNITGProxy(
                 eq=eqfam[-1], rho=rho, alpha=alpha, weight=0.1,
                 ensemble_dir=MODEL_DIR, ensemble_csv=MODEL_CSV, n_ensemble=1,
@@ -104,7 +104,7 @@ for n in range(2, 3):
         objective=objective,
         constraints=constraints,
         optimizer=optimizer,
-        maxiter=50,
+        maxiter=1000,
         verbose=3,
         copy=True,
         ftol=1e-4,
