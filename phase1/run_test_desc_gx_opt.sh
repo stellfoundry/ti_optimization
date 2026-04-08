@@ -16,13 +16,15 @@
 
 # python -u test_desc_gx_opt.py
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 module load python
 conda activate desc-gx
 
-export TI_OPT_GX_DIR=/global/cfs/projectdirs/m4505/rchurchi/gx
-export TI_OPT_GX_EXEC=gx
-export TI_OPT_GX_INPUT_FILE=gx.in
-export TI_OPT_GX_LAUNCH=gx-launch.sh
+export TI_OPT_GX_DIR="${TI_OPT_GX_DIR:-${REPO_ROOT}/gx}"
+export TI_OPT_GX_EXEC="${TI_OPT_GX_EXEC:-gx}"
+export TI_OPT_GX_INPUT_FILE="${TI_OPT_GX_INPUT_FILE:-${SCRIPT_DIR}/gx.in}"
+export TI_OPT_GX_LAUNCH="${TI_OPT_GX_LAUNCH:-${SCRIPT_DIR}/gx-launch.sh}"
 
-srun python3 -u test_desc_gx_opt.py
-
+srun python3 -u "${SCRIPT_DIR}/test_desc_gx_opt.py"

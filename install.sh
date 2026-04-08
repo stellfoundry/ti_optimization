@@ -32,11 +32,14 @@ GX_BRANCH="gx"
 GX_DIR="${SCRIPT_DIR}/gx"
 GX_JOBS=8
 GX_SYSTEM="perlmutter"
-GX_LAUNCH_SCRIPT="${SCRIPT_DIR}/gx-launch.sh"
-GX_GEOMETRY_PATH="${SCRIPT_DIR}/gx_geometry"
-if [[ -d "${SCRIPT_DIR}/phase0/gx_geometry" ]]; then
-  GX_GEOMETRY_PATH="${SCRIPT_DIR}/phase0/gx_geometry"
+GX_CONFIG="${SCRIPT_DIR}/gx.config"
+GX_LAUNCH_SCRIPT="${SCRIPT_DIR}/phase1/gx-launch.sh"
+if [[ -f "${SCRIPT_DIR}/gx-launch.sh" ]]; then
+  GX_LAUNCH_SCRIPT="${SCRIPT_DIR}/gx-launch.sh"
 fi
+GX_GEOMETRY_REPO_URL="https://github.com/landreman/gx_geometry.git"
+GX_GEOMETRY_BRANCH="main"
+GX_GEOMETRY_PATH="${SCRIPT_DIR}/gx_geometry"
 UTILS_PY="${SCRIPT_DIR}/utils.py"
 MODEL_DIR="${SCRIPT_DIR}/data/neural_networks/cyclic_invariant_models"
 GX_PYTHON_DEPS=(netCDF4)
@@ -110,21 +113,36 @@ load_python_module_stack() {
   module load python >/dev/null 2>&1 || true
 }
 
-load_gx_module_stack() {
-  ensure_module_cmd
-  module load PrgEnv-gnu/8.5.0
-  module load nvidia-mixed/24.5
-  module load cudatoolkit/12.4
-  module load cray-mpich/8.1.28
-  module load nccl
-  module load cray-hdf5-parallel
-  module load cray-netcdf-hdf5parallel
-  module load python >/dev/null 2>&1 || true
+ensure_gx_config() {
+  if [[ ! -f "${GX_CONFIG}" ]]; then
+    fail_install "GX config not found at ${GX_CONFIG}"
+    return 1
+  fi
+}
 
-  export GK_SYSTEM="${GX_SYSTEM}"
-  export MPICH_GPU_SUPPORT_ENABLED=0
-  export FI_CXI_RDZV_GET_MIN=0
-  export FI_CXI_SAFE_DEVMEM_COPY_THRESHOLD=16777216
+build_gx_in_subprocess() {
+  local gx_build_dir
+
+  ensure_gx_config || return 1
+  gx_build_dir="$(cd "${GX_DIR}" && pwd)"
+
+  if ! GX_CONFIG="${GX_CONFIG}" \
+    GX_JOBS="${GX_JOBS}" \
+    GX_PATH="${gx_build_dir}" \
+    GK_SYSTEM="${GX_SYSTEM}" \
+    bash <<'EOF'
+set -euo pipefail
+source "${GX_CONFIG}"
+echo "==> GX module stack:"
+module --redirect list 2>/dev/null || module -t list 2>&1 || true
+cd "${GX_PATH}"
+make clean >/dev/null 2>&1 || true
+make -j "${GX_JOBS}"
+EOF
+  then
+    fail_install "GX build failed. The GX source was cloned to ${GX_DIR} for inspection."
+    return 1
+  fi
 }
 
 ensure_repo_checkout() {
@@ -169,16 +187,7 @@ PY
   pause_step "GX Python dependency install complete"
 
   echo "==> Building GX from source for ${GX_SYSTEM}"
-  if ! (
-    set -euo pipefail
-    load_gx_module_stack
-    cd "${GX_DIR}"
-    make clean >/dev/null 2>&1 || true
-    make -j "${GX_JOBS}"
-  ); then
-    fail_install "GX build failed. The GX source was cloned to ${GX_DIR} for inspection."
-    return 1
-  fi
+  build_gx_in_subprocess
   pause_step "GX build complete"
 
   if [[ ! -x "${GX_DIR}/gx" ]]; then
@@ -348,12 +357,10 @@ PY
 
   build_gx
 
-  if [[ -d "${GX_GEOMETRY_PATH}" ]]; then
-    echo "==> Installing gx_geometry from: ${GX_GEOMETRY_PATH}"
-    pip install -e "${GX_GEOMETRY_PATH}"
-  else
-    echo "==> WARNING: gx_geometry folder not found at ${GX_GEOMETRY_PATH}. Skipping."
-  fi
+  ensure_repo_checkout "${GX_GEOMETRY_REPO_URL}" "${GX_GEOMETRY_BRANCH}" "${GX_GEOMETRY_PATH}" "gx_geometry"
+
+  echo "==> Installing gx_geometry from: ${GX_GEOMETRY_PATH}"
+  pip install -e "${GX_GEOMETRY_PATH}"
   pause_step "gx_geometry step complete"
 
   if [[ ${INSTALL_TORCH} -eq 1 ]]; then

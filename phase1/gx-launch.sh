@@ -6,30 +6,19 @@ if [[ $# -lt 1 ]]; then
   exit 2
 fi
 
-if ! command -v module >/dev/null 2>&1; then
-  if [[ -f /opt/cray/pe/lmod/lmod/init/bash ]]; then
-    # shellcheck disable=SC1091
-    source /opt/cray/pe/lmod/lmod/init/bash
-  fi
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+GX_CONFIG="${SCRIPT_DIR}/gx.config"
 
-if ! command -v module >/dev/null 2>&1; then
-  echo "module command not found; cannot prepare the GX runtime on Perlmutter." >&2
+if [[ ! -f "${GX_CONFIG}" ]]; then
+  echo "GX config not found at ${GX_CONFIG}" >&2
   exit 1
 fi
 
-module load PrgEnv-gnu/8.5.0
-module load nvidia-mixed/24.5
-module load cudatoolkit/12.4
-module load cray-mpich/8.1.28
-module load nccl
-module load cray-hdf5-parallel
-module load cray-netcdf-hdf5parallel
-module load python >/dev/null 2>&1 || true
+if [[ -z "${GX_PATH:-}" && "$1" == */* ]]; then
+  export GX_PATH="$(cd "$(dirname "$1")" && pwd)"
+fi
 
-export GK_SYSTEM="${GK_SYSTEM:-perlmutter}"
-export MPICH_GPU_SUPPORT_ENABLED="${MPICH_GPU_SUPPORT_ENABLED:-0}"
-export FI_CXI_RDZV_GET_MIN="${FI_CXI_RDZV_GET_MIN:-0}"
-export FI_CXI_SAFE_DEVMEM_COPY_THRESHOLD="${FI_CXI_SAFE_DEVMEM_COPY_THRESHOLD:-16777216}"
+# shellcheck disable=SC1090
+source "${GX_CONFIG}"
 
 exec "$@"

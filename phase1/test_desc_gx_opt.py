@@ -16,7 +16,10 @@ GX_EXEC = os.environ.get("TI_OPT_GX_EXEC", "gx")
 GX_INPUT_FILE = Path(
     os.environ.get("TI_OPT_GX_INPUT_FILE", "gx.in")
 ).resolve()
-GX_LAUNCH = Path(os.environ.get("TI_OPT_GX_LAUNCH", REPO_ROOT / "gx-launch.sh")).resolve()
+GX_LAUNCH_DEFAULT = REPO_ROOT / "phase1" / "gx-launch.sh"
+if not GX_LAUNCH_DEFAULT.is_file():
+    GX_LAUNCH_DEFAULT = REPO_ROOT / "gx-launch.sh"
+GX_LAUNCH = Path(os.environ.get("TI_OPT_GX_LAUNCH", GX_LAUNCH_DEFAULT)).resolve()
 
 # DESC's GX objective always shells out via subprocess.run. The launch wrapper is
 # therefore a prefix command for the child process, not an in-process library shim.
