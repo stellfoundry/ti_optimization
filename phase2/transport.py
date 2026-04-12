@@ -8,7 +8,6 @@ from scipy.optimize import root
 
 # DESC imports
 from desc.grid import LinearGrid
-from desc.integrals.surface_integral import surface_averages
 
 
 def _log(message: str) -> None:
@@ -43,12 +42,15 @@ class TransportConfig:
     N_grid: int | None = None    # default to eq.N_grid when unset
     max_iter: int = 30
     verbose: bool = True
+    enforce_inner_flux_bc: bool = False
+    inner_flux_target: float = 0.0
 
 
 def gxnn_flux_surface_average(
     eq,
     gxnn_model,
     rho_vals,
+    n_alpha=8,
     M=None,
     N=None,
     alpha_definition="theta_minus_iota_zeta",
@@ -57,8 +59,12 @@ def gxnn_flux_surface_average(
     data=None,
     verbose=False,
 ):
-    """Compute a DESC-consistent flux-surface average from a GX-style surrogate."""
+    """Compute a T3D-style sampled flux-surface average from a GX-style surrogate."""
     rho_vals = np.atleast_1d(np.asarray(rho_vals, dtype=float))
+    rho_unique = np.asarray(rho_vals, dtype=float).reshape(-1)
+    n_alpha = int(n_alpha)
+    if n_alpha < 1:
+        raise ValueError(f"n_alpha must be >= 1, got {n_alpha}")
 
     if M is None:
         M = getattr(eq, "M_grid", 32)
@@ -98,18 +104,25 @@ def gxnn_flux_surface_average(
         raise KeyError("data must contain either 'sqrt(g)' or 'sqrt_g'")
 
     nodes = np.asarray(grid.nodes)
-    rho = nodes[:, 0]
-    theta = nodes[:, 1]
-    zeta = nodes[:, 2]
-    iota = np.asarray(data["iota"])
+    rho_nodes = nodes[:, 0]
+    iota_nodes = np.asarray(data["iota"])
+
+    surface_iota = np.zeros_like(rho_unique, dtype=float)
+    for i, rho_value in enumerate(rho_unique):
+        idx = np.where(np.isclose(rho_nodes, rho_value, atol=1e-12, rtol=0.0))[0]
+        if idx.size == 0:
+            raise ValueError(f"Could not find rho={rho_value} in geometry grid")
+        surface_iota[i] = float(iota_nodes[idx[0]])
+
+    alpha_line = np.linspace(0.0, 2.0 * np.pi, n_alpha, endpoint=False, dtype=float)
+    rho = np.repeat(rho_unique, n_alpha)
+    alpha = np.tile(alpha_line, rho_unique.size)
 
     if alpha_definition == "theta_minus_iota_zeta":
-        alpha = theta - iota * zeta
+        theta = alpha.copy()
+        zeta = np.zeros_like(alpha)
     else:
-        raise NotImplementedError(
-            f"Unsupported alpha_definition={alpha_definition}"
-        )
-    alpha = np.mod(alpha, 2 * np.pi)
+        raise NotImplementedError(f"Unsupported alpha_definition={alpha_definition}")
 
     extra_kwargs = {}
     if surrogate_kwargs_fn is not None:
@@ -119,23 +132,21 @@ def gxnn_flux_surface_average(
 
     if verbose:
         _log(
-            "[transport] evaluating local GX surrogate on DESC nodes:"
-            f" n_nodes={rho.size}, nrho={rho_vals.size}"
+            "[transport] evaluating local GX surrogate on sampled field lines:"
+            f" n_samples={rho.size}, nrho={rho_unique.size}, n_alpha={n_alpha}"
         )
     q_nodes = np.asarray(gxnn_model(rho=rho, alpha=alpha, **extra_kwargs), dtype=float)
     if q_nodes.ndim == 0:
         q_nodes = np.full(rho.shape, float(q_nodes), dtype=float)
     if q_nodes.shape != rho.shape:
         raise ValueError(
-            "gxnn_model must return one flux value per grid node; "
+            "gxnn_model must return one flux value per sampled field line; "
             f"expected shape {rho.shape}, got {q_nodes.shape}"
         )
 
     if verbose:
-        _log("[transport] computing flux-surface averages")
-    q_fsa_full = np.asarray(surface_averages(grid, q_nodes, sqrt_g=sqrt_g))
-    q_fsa = np.asarray(grid.compress(q_fsa_full, surface_label="rho"), dtype=float)
-    rho_unique = np.asarray(grid.compress(rho, surface_label="rho"), dtype=float)
+        _log("[transport] computing T3D-style mean over sampled field lines")
+    q_fsa = np.asarray(q_nodes.reshape(rho_unique.size, n_alpha).mean(axis=1), dtype=float)
 
     if verbose:
         _log(
@@ -148,6 +159,8 @@ def gxnn_flux_surface_average(
         "q_fsa": q_fsa,
         "q_nodes": q_nodes,
         "alpha": alpha,
+        "rho_nodes": rho,
+        "iota": surface_iota,
         "grid": grid,
         "data": data,
     }
@@ -334,7 +347,6 @@ class StellaratorPowerBalanceSolver:
         Ti_faces = np.asarray(Ti_spline(self.rho_faces), dtype=float)
         ni_faces = np.asarray(self.density_profile(self.rho_faces), dtype=float)
         aLni_faces = self._a_over_Lni(self.rho_faces)
-        surface_idx = self.geom_faces["surface_inverse_idx"]
         geom = self.geom_faces
         self._interface_state_calls += 1
 
@@ -342,15 +354,23 @@ class StellaratorPowerBalanceSolver:
             _log(
                 "[transport] compute_interface_state:"
                 f" call={self._interface_state_calls}, n_faces={self.rho_faces.size},"
-                f" n_nodes={geom['nodes'].shape[0]}"
+                f" geometry_nodes={geom['nodes'].shape[0]}, n_alpha={self.cfg.n_alpha}"
             )
 
         def surrogate_kwargs_fn(rho, theta, zeta, data):
+            rho = np.asarray(rho, dtype=float).reshape(-1)
+            sample_surface_idx = np.array(
+                [
+                    np.argmin(np.abs(self.rho_faces - float(rho_value)))
+                    for rho_value in rho
+                ],
+                dtype=int,
+            )
             kwargs = {
-                "aLTi": aLTi_faces[surface_idx],
-                "aLni": aLni_faces[surface_idx],
-                "Ti": Ti_faces[surface_idx],
-                "ni": ni_faces[surface_idx],
+                "aLTi": aLTi_faces[sample_surface_idx],
+                "aLni": aLni_faces[sample_surface_idx],
+                "Ti": Ti_faces[sample_surface_idx],
+                "ni": ni_faces[sample_surface_idx],
                 "extra": {},
             }
             if extra_features is not None:
@@ -362,6 +382,7 @@ class StellaratorPowerBalanceSolver:
             eq=self.eq,
             gxnn_model=self.gx_flux_model,
             rho_vals=self.rho_faces,
+            n_alpha=self.cfg.n_alpha,
             M=self.cfg.M_grid,
             N=self.cfg.N_grid,
             surrogate_kwargs_fn=surrogate_kwargs_fn,
@@ -386,7 +407,7 @@ class StellaratorPowerBalanceSolver:
             "Q_faces": np.asarray(fsa_result["q_fsa"], dtype=float),
             "q_nodes": np.asarray(fsa_result["q_nodes"], dtype=float),
             "alpha_nodes": np.asarray(fsa_result["alpha"], dtype=float),
-            "rho_nodes": np.asarray(geom["nodes"][:, 0], dtype=float),
+            "rho_nodes": np.asarray(fsa_result["rho_nodes"], dtype=float),
             "Ti_faces": Ti_faces,
             "ni_faces": ni_faces,
             "aLTi_faces": np.asarray(aLTi_faces, dtype=float),
@@ -426,13 +447,14 @@ class StellaratorPowerBalanceSolver:
         }
 
         if not np.all(np.isfinite(Ti_center)) or np.any(Ti_center <= 0.0):
+            n_samples = self.rho_faces.size * self.cfg.n_alpha
             diagnostics.update(
                 {
                     "Ti": Ti_center,
                     "Q_faces": np.full_like(self.rho_faces, np.nan, dtype=float),
-                    "q_nodes": np.full(self.geom_faces["nodes"].shape[0], np.nan, dtype=float),
-                    "alpha_nodes": np.full(self.geom_faces["nodes"].shape[0], np.nan, dtype=float),
-                    "rho_nodes": np.asarray(self.geom_faces["nodes"][:, 0], dtype=float),
+                    "q_nodes": np.full(n_samples, np.nan, dtype=float),
+                    "alpha_nodes": np.full(n_samples, np.nan, dtype=float),
+                    "rho_nodes": np.repeat(np.asarray(self.rho_faces, dtype=float), self.cfg.n_alpha),
                     "Ti_faces": np.full_like(self.rho_faces, np.nan, dtype=float),
                     "ni_faces": np.full_like(self.rho_faces, np.nan, dtype=float),
                     "aLTi_faces": np.full_like(self.rho_faces, np.nan, dtype=float),
@@ -450,14 +472,17 @@ class StellaratorPowerBalanceSolver:
         interface_state = self.compute_interface_state(Ti_center, extra_features=extra_features)
         flux_divergence = self._flux_divergence(interface_state["Q_faces"])
         residual = flux_divergence - source_centers
-        residual[0] = interface_state["Q_faces"][0]
-        if T_edge is not None:
-            residual[-1] = Ti_center[-1] - T_edge
 
         diagnostics.update(interface_state)
         diagnostics["Ti"] = Ti_center
         diagnostics["flux_divergence"] = flux_divergence
         diagnostics["residual"] = residual
+        if self.cfg.enforce_inner_flux_bc:
+            diagnostics["residual"][0] = (
+                interface_state["Q_faces"][0] - self.cfg.inner_flux_target
+            )
+        if T_edge is not None:
+            diagnostics["residual"][-1] = Ti_center[-1] - T_edge
         return diagnostics
 
     # ------------------------------------------------------------------
@@ -490,10 +515,11 @@ class StellaratorPowerBalanceSolver:
             dtype=float,
         )
 
-        # Axis regularity:
-        # enforce zero inward flux at the first face by replacing first residual
-        # with Q(rho_inner) ~ 0 if rho_inner is sufficiently close to axis.
-        R[0] = Q_faces[0]
+        # Only impose an inner flux boundary condition when explicitly requested.
+        # Otherwise the left-side spline regularity and finite-volume balance
+        # determine the inner behavior on the truncated domain [rho_inner, rho_outer].
+        if self.cfg.enforce_inner_flux_bc:
+            R[0] = Q_faces[0] - self.cfg.inner_flux_target
 
         # Optional fixed-edge-temperature boundary condition
         if T_edge is not None:
@@ -519,6 +545,12 @@ class StellaratorPowerBalanceSolver:
             _log(
                 "[transport] starting scipy root solve:"
                 f" nr={len(Ti_init)}, max_iter={self.cfg.max_iter}"
+            )
+            initial_residual = F(Ti_init)
+            _log(
+                "[transport] initial residual scale:"
+                f" norm={np.linalg.norm(initial_residual):.6e},"
+                f" max_abs={np.max(np.abs(initial_residual)):.6e}"
             )
         sol = root(
             F,

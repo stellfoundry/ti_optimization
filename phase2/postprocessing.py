@@ -54,13 +54,15 @@ class TransportEstimateConfig:
     max_iter: int = 30
     verbose: bool = True
     edge_temperature: float = 1.0
-    initial_core_temperature: float = 8.0
+    initial_core_temperature: float = 2.5
     initial_profile_shape: float = 0.85
     temperature_unit_eV: float = 1.0e3
     ion_mass_number: float = 2.0
     ion_charge_state: float = 1.0
     flux_scale_factor: float = 1.0
     minimum_heat_flux_scale: float = 1.0e-8
+    enforce_inner_flux_bc: bool = False
+    inner_flux_target: float = 0.0
 
     def to_transport_config(self) -> TransportConfig:
         return TransportConfig(
@@ -72,6 +74,8 @@ class TransportEstimateConfig:
             N_grid=self.N_grid,
             max_iter=self.max_iter,
             verbose=self.verbose,
+            enforce_inner_flux_bc=self.enforce_inner_flux_bc,
+            inner_flux_target=self.inner_flux_target,
         )
 
 
@@ -170,7 +174,7 @@ class _CachedNNITGTransportModel:
             if self.verbose:
                 _log(
                     "[transport] cache miss:"
-                    f" rho={rho_value:.6f}, n_alpha_nodes={alpha_values.size};"
+                    f" rho={rho_value:.6f}, n_alpha_samples={alpha_values.size};"
                     " building NNITGProxy"
                 )
             proxy = NNITGProxy(
@@ -306,11 +310,13 @@ class TurbulencePostprocessor:
         rho_centers: np.ndarray,
         transport_config: TransportEstimateConfig,
     ) -> np.ndarray:
-        return (
-            transport_config.initial_core_temperature
-            * (1.0 - transport_config.initial_profile_shape * rho_centers**2)
-            + transport_config.edge_temperature
-        )
+        # Interpret initial_core_temperature as the approximate on-axis temperature,
+        # not as an offset added on top of the edge temperature.
+        core = float(transport_config.initial_core_temperature)
+        edge = float(transport_config.edge_temperature)
+        shape = float(transport_config.initial_profile_shape)
+        profile = 1.0 - shape * rho_centers**2
+        return edge + (core - edge) * profile
 
     @staticmethod
     def _diagnostic_label(label: str) -> str:
@@ -333,6 +339,33 @@ class TurbulencePostprocessor:
             if isinstance(value, str):
                 continue
             payload[key] = np.asarray(value)
+
+        q_nodes = payload.get("q_nodes")
+        rho_faces = payload.get("rho_faces")
+        alpha_nodes = payload.get("alpha_nodes")
+        rho_nodes = payload.get("rho_nodes")
+        if q_nodes is not None:
+            q_nodes = np.asarray(q_nodes, dtype=float).reshape(-1)
+            payload["nn_heat_flux_samples"] = q_nodes
+        if q_nodes is not None and rho_faces is not None:
+            rho_faces = np.asarray(rho_faces, dtype=float).reshape(-1)
+            if rho_faces.size > 0 and q_nodes.size % rho_faces.size == 0:
+                n_alpha_samples = q_nodes.size // rho_faces.size
+                sample_shape = (rho_faces.size, n_alpha_samples)
+                payload["n_alpha_samples"] = np.asarray(n_alpha_samples, dtype=int)
+                payload["nn_heat_flux_samples_by_face"] = q_nodes.reshape(sample_shape)
+                payload["nn_heat_flux_fsa_from_samples"] = np.asarray(
+                    payload["nn_heat_flux_samples_by_face"].mean(axis=1),
+                    dtype=float,
+                )
+                if alpha_nodes is not None:
+                    alpha_nodes = np.asarray(alpha_nodes, dtype=float).reshape(-1)
+                    if alpha_nodes.size == q_nodes.size:
+                        payload["alpha_samples_by_face"] = alpha_nodes.reshape(sample_shape)
+                if rho_nodes is not None:
+                    rho_nodes = np.asarray(rho_nodes, dtype=float).reshape(-1)
+                    if rho_nodes.size == q_nodes.size:
+                        payload["rho_samples_by_face"] = rho_nodes.reshape(sample_shape)
         np.savez(diagnostic_path, **payload)
         return diagnostic_path
 
@@ -638,10 +671,17 @@ class TurbulencePostprocessor:
                 f"(residual norm {residual_norm:.3e}, nfev {int(result['nfev'])}) "
                 f"- {message}"
             )
+            diagnostic_path = self._save_transport_diagnostics(label, result, filename)
+            q_nodes = np.asarray(result["q_nodes"], dtype=float)
+            if np.any(np.isfinite(q_nodes)):
+                local_min = np.nanmin(q_nodes)
+                local_max = np.nanmax(q_nodes)
+            else:
+                local_min = np.nan
+                local_max = np.nan
             if not bool(result["success"]):
                 flux_divergence = np.asarray(result["flux_divergence"], dtype=float)
                 source = np.asarray(result["source_centers"], dtype=float)
-                diagnostic_path = self._save_transport_diagnostics(label, result, filename)
                 _log(
                     f"  source norm {np.linalg.norm(source):.3e}, "
                     f"flux-divergence norm {np.linalg.norm(flux_divergence):.3e}, "
@@ -649,7 +689,10 @@ class TurbulencePostprocessor:
                     f"B_ref {float(result['gx_B_reference']):.3e} T, "
                     f"L_ref {float(result['gx_L_reference']):.3e} m"
                 )
-                _log(f"  Saved diagnostics: {diagnostic_path}")
+            _log(
+                f"  Saved diagnostics: {diagnostic_path} "
+                f"(local NN heat flux min/max {local_min:.3e}/{local_max:.3e})"
+            )
 
         ax_temp.set_xlabel(r"$\rho$")
         ax_temp.set_ylabel(r"$T_i$ estimate (transport-model units)")
