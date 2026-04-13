@@ -18,8 +18,15 @@ Follow instructions for installing the AI GX version of T3D https://bitbucket.or
 ## PLAN
 Use as a starting point the optimization of the reactor scale stellarator from the Landreman-Paul precise QA stellarator paper, the example found in DESC: `https://github.com/PlasmaControl/DESC/blob/master/desc/examples/reactor_QA.py`
 
-### Phase0: Fixed gradient scale lengths, fixed locations
-- Idea: With fixed locations and fixed gradient scale lengths (same as Matt's paper, fprim = 0.9, tprim = 3.0), calculate heat fluxes, and simply average for a global optimization target, along with other targets/constraints from the normal DESC optimization
+### Phase0: Fixed gradient scale lengths, single location
+- Idea: Optimize MHD equilibrium using as a optimization target the turbulent ion heat flux calculated using the GX neural network surrogate at a single, fixed location (s=0.5) and fixed gradient scale lengths (same as Matt's paper, fprim = 0.9, tprim = 3.0), along with other targets/constraints from the normal DESC optimization
 - Implementation by Byoungchan Jang (byoungj@umd.edu) in the `phase0` folder. See README.md in `phase0` folder for more details.
 
-### Phase1: 
+### Phase1: Multi-fidelity optimization (WORK-IN-PROGRESS)
+- Idea: Multi-fidelity optimization, using the GX neural network surrogate for low-fidelity and the actual GX simulation for high-fidelity when needed. 
+
+### Phase2: Fixed gradient scale lengths, multiple locations
+- Idea: Optimize MHD equilibrium using as an optimization target the turbulent ion heat flux calculated using the GX neural network surrogate at multiple radial and field line angles (alpha) and fixed gradient scale lengths (same as Matt's paper, fprim = 0.9, tprim = 3.0), along with other targets/constraints from the normal DESC optimization.
+
+### Phase3: Critical gradient
+- Idea: Optimize MHD equilibrium using as an optimization target the turbulent ion heat flux calculated using the GX neural network surrogate at multiple radial and field line angles (alpha), but now using a critical gradient model, where the gradient scale length is swept in order to find the correspoonding critical gradient, and optimzizing  along with other targets/constraints from the normal DESC optimization.
