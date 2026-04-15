@@ -87,7 +87,7 @@ class OptimizationConfig:
     aspect_ratio_target: float = 6.0
     aspect_ratio_weight: float = 1.0 / 6.0
     target_flux_tube_length: float = 75.4
-    a_over_Ln: float = 0.9
+    a_over_Ln: float = 0.3
     a_over_LT_grid: np.ndarray = field(
         default_factory=lambda: np.linspace(0.25, 4.25, 8, dtype=float)
     )

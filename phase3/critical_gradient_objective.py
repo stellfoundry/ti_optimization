@@ -78,7 +78,8 @@ class NNCriticalGradientProxy(NNITGProxy):
         if alpha_aggregation not in {"mean", "worst", "separate"}:
             raise ValueError("alpha_aggregation must be 'mean', 'worst', or 'separate'")
 
-        self._a_over_LT_grid = jnp.asarray(a_over_LT_grid)
+        # self._a_over_LT_grid = jnp.asarray(a_over_LT_grid)
+        self._a_over_LT_grid = tuple(float(v) for v in a_over_LT_grid)
         self._critical_q_threshold = float(critical_q_threshold)
         self._critical_log_width = float(critical_log_width)
         self._alpha_aggregation = alpha_aggregation
@@ -110,7 +111,8 @@ class NNCriticalGradientProxy(NNITGProxy):
 
     def build(self, use_jit=True, verbose=1):
         super().build(use_jit=use_jit, verbose=verbose)
-        self._constants["a_over_LT_grid"] = self._a_over_LT_grid
+        # self._constants["a_over_LT_grid"] = self._a_over_LT_grid
+        self._constants["a_over_LT_grid"] = jnp.asarray(self._a_over_LT_grid, dtype=float)
         self._constants["critical_q_threshold"] = self._critical_q_threshold
         self._constants["critical_log_width"] = self._critical_log_width
 
