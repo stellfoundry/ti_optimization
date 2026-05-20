@@ -179,18 +179,91 @@ class CriticalGradientPostprocessor:
         _log(f"Saved: {path}")
         return path
 
+    def plot_heat_flux_scans_by_rho(
+        self,
+        equilibria,
+        labels,
+        *,
+        rho_values,
+        alpha,
+        filename="06_heat_flux_scans_by_rho.png",
+    ):
+        rho_values = self._as_1d(rho_values)
+        alpha = self._as_1d(alpha)
+        if rho_values.size == 0:
+            raise ValueError("plot_heat_flux_scans_by_rho expects at least one rho value")
+
+        ncols = min(3, rho_values.size)
+        nrows = int(np.ceil(rho_values.size / ncols))
+        fig, axes = plt.subplots(
+            nrows,
+            ncols,
+            figsize=(4.2 * ncols, 3.2 * nrows),
+            squeeze=False,
+            sharex=True,
+            sharey=True,
+        )
+        axes_flat = axes.ravel()
+        markers = ["o-", "s-", "^-", "d-"]
+
+        for idx, (eq, label) in enumerate(zip(equilibria, labels)):
+            _, q_sweep = self.evaluate_q_sweep(eq, rho=rho_values, alpha=alpha)
+            q_mean = q_sweep.mean(axis=-1)
+            marker = markers[idx % len(markers)]
+            for rho_idx, _ in enumerate(rho_values):
+                axes_flat[rho_idx].plot(
+                    self.config.a_over_LT_grid,
+                    q_mean[rho_idx],
+                    marker,
+                    color=f"C{idx}",
+                    label=label,
+                )
+
+        for rho_idx, rho_value in enumerate(rho_values):
+            ax = axes_flat[rho_idx]
+            ax.axhline(1.0, color="k", linestyle=":", linewidth=1.2, label="Q=1")
+            ax.set_title(rf"$\rho={rho_value:.3f}$")
+            ax.grid(True, alpha=0.3)
+
+        for ax in axes_flat[rho_values.size :]:
+            ax.set_visible(False)
+
+        for ax in axes[-1, :]:
+            if ax.get_visible():
+                ax.set_xlabel(r"$a/L_{T_i}$")
+        for ax in axes[:, 0]:
+            if ax.get_visible():
+                ax.set_ylabel("Alpha-averaged heat flux Q")
+
+        handles, legend_labels = axes_flat[0].get_legend_handles_labels()
+        fig.legend(handles, legend_labels, loc="upper center", ncol=len(handles))
+        fig.suptitle(r"Heat flux scans by $\rho$")
+        fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.94))
+
+        path = os.path.join(self.output_dir, filename)
+        fig.savefig(path, dpi=150)
+        plt.close(fig)
+        _log(f"Saved: {path}")
+        return path
+
     def run_default_suite(
         self,
         initial_eq,
         optimized_eq,
         *,
-        labels=("Initial", "Optimized"),
+        labels=("Initial", "Final"),
         scan_rho=np.array([np.sqrt(0.5)], dtype=float),
         scan_alpha=np.linspace(0.0, np.pi, 8, dtype=float),
         rho_scan_values=np.linspace(0.05, 0.95, 12, dtype=float),
         rho_scan_alpha=np.linspace(0.0, np.pi, 8, dtype=float),
+        heat_flux_rho_values=None,
+        heat_flux_alpha=None,
     ):
         equilibria = [initial_eq, optimized_eq]
+        if heat_flux_rho_values is None:
+            heat_flux_rho_values = rho_scan_values
+        if heat_flux_alpha is None:
+            heat_flux_alpha = rho_scan_alpha
         return {
             "03_flux_surface_comparison": self.plot_flux_surface_comparison(equilibria, labels),
             "04_critical_gradient_scan": self.plot_critical_gradient_scan_comparison(
@@ -204,5 +277,11 @@ class CriticalGradientPostprocessor:
                 labels,
                 rho_values=rho_scan_values,
                 alpha=rho_scan_alpha,
+            ),
+            "06_heat_flux_scans_by_rho": self.plot_heat_flux_scans_by_rho(
+                equilibria,
+                labels,
+                rho_values=heat_flux_rho_values,
+                alpha=heat_flux_alpha,
             ),
         }

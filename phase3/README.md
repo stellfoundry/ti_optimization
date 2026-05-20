@@ -33,6 +33,7 @@ Running `phase3/qs_critical_gradient_opt.py` writes to `phase3/output`:
 - `03_flux_surface_comparison.png`
 - `04_critical_gradient_scan.png`
 - `05_critical_gradient_vs_rho.png`
+- `06_heat_flux_scans_by_rho.png`
 - `critical_gradient_summary.txt`
 
 Submit on Perlmutter with:
