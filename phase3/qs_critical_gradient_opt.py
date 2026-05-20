@@ -32,6 +32,8 @@ from desc.objectives import (
     ForceBalance,
     ObjectiveFunction,
     QuasisymmetryTwoTerm,
+    PrincipalCurvature,
+    GoodCoordinates,
 )
 from desc.optimize import Optimizer
 
@@ -81,13 +83,13 @@ class OptimizationConfig:
         )
     )
     alpha: np.ndarray = field(default_factory=lambda: np.array([0.0], dtype=float))
-    mode_steps: tuple[int, ...] = (2,)
+    mode_steps: tuple[int, ...] = (2,) #(2,)
     qs_weight: float = 0.1
-    critical_gradient_weight: float = 0.1
+    critical_gradient_weight: float = 1.0 #0.1
     aspect_ratio_target: float = 6.0
     aspect_ratio_weight: float = 1.0 / 6.0
     target_flux_tube_length: float = 75.4
-    a_over_Ln: float = 0.9
+    a_over_Ln: float = 0.3
     a_over_LT_grid: np.ndarray = field(
         default_factory=lambda: np.linspace(0.25, 4.25, 8, dtype=float)
     )
@@ -156,6 +158,23 @@ def build_objective(eq, qs_grid, config: OptimizationConfig, paths: ProjectPaths
                 grid=qs_grid,
                 normalize=False,
                 normalize_target=False,
+            ),
+                # New geometric anti-cusp protection
+            PrincipalCurvature(
+                eq=eq,
+                # Using bounds is usually more natural than a target here:
+                # penalize only if curvature exceeds this threshold.
+                # Units / normalization depend on your setup; tune this.
+                bounds=(0.0, 8.0),
+                weight=5.0,
+                normalize=True,
+                name="max principal curvature cap",
+            ),
+            GoodCoordinates(
+                eq=eq,
+                weight=1.0,
+                normalize=True,
+                name="coordinate regularity",
             ),
         )
     )
@@ -241,6 +260,8 @@ def run_postprocessing(
         scan_alpha=config.scan_alpha,
         rho_scan_values=config.rho_scan_values,
         rho_scan_alpha=config.rho_scan_alpha,
+        heat_flux_rho_values=config.rho,
+        heat_flux_alpha=config.alpha,
     )
 
 

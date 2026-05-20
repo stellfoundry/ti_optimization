@@ -32,6 +32,8 @@ from desc.objectives import (
     NNITGProxy,
     ObjectiveFunction,
     QuasisymmetryTwoTerm,
+    PrincipalCurvature,
+    GoodCoordinates,
 )
 from desc.optimize import Optimizer
 from desc.plotting import plot_comparison
@@ -77,6 +79,23 @@ for n in range(2, 3):
             AspectRatio(
                 eq=eqfam[-1], target=6.0, weight=1.0 / 6.0,
                 grid=qs_grid, normalize=False, normalize_target=False,
+            ),
+                            # New geometric anti-cusp protection
+            PrincipalCurvature(
+                eq=eq,
+                # Using bounds is usually more natural than a target here:
+                # penalize only if curvature exceeds this threshold.
+                # Units / normalization depend on your setup; tune this.
+                bounds=(0.0, 8.0),
+                weight=5.0,
+                normalize=True,
+                name="max principal curvature cap",
+            ),
+            GoodCoordinates(
+                eq=eq,
+                weight=1.0,
+                normalize=True,
+                name="coordinate regularity",
             ),
         ),
     )
