@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import json
+import time
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -129,6 +131,24 @@ def ensure_output_dir(paths: ProjectPaths) -> None:
     os.makedirs(paths.output_dir, exist_ok=True)
 
 
+def summarize_optimizer_result(result) -> dict:
+    summary = {}
+    for key in ("message", "success", "nit", "nfev", "njev", "cost", "optimality"):
+        if not hasattr(result, key):
+            continue
+        value = getattr(result, key)
+        try:
+            if hasattr(value, "item"):
+                value = value.item()
+        except Exception:
+            pass
+        if isinstance(value, (bool, int, float, str)) or value is None:
+            summary[key] = value
+        else:
+            summary[key] = str(value)
+    return summary
+
+
 def build_objective(eq, qs_grid, config: OptimizationConfig, paths: ProjectPaths):
     return ObjectiveFunction(
         (
@@ -188,28 +208,75 @@ def run_optimization(config: OptimizationConfig, paths: ProjectPaths) -> Equilib
 
     eq_family = EquilibriaFamily(eq)
     qs_grid = QuadratureGrid(L=eq.L, M=eq.M, N=eq.N, NFP=eq.NFP)
+    stage_summaries = []
 
-    for max_mode in config.mode_steps:
+    for stage_index, max_mode in enumerate(config.mode_steps, start=1):
         print("\n==================================")
         print(f"Optimizing boundary modes M,N <= {max_mode}")
         print("====================================")
 
+        stage_start = time.monotonic()
+        stage_summary = {
+            "stage": stage_index,
+            "max_mode": int(max_mode),
+            "status": "running",
+            "start_elapsed_seconds": stage_start,
+        }
         objective = build_objective(eq_family[-1], qs_grid, config, paths)
         constraints = build_constraints(eq_family[-1], max_mode)
         optimizer = Optimizer(config.optimizer_name)
-        eq_new, _ = eq_family[-1].optimize(
-            objective=objective,
-            constraints=constraints,
-            optimizer=optimizer,
-            maxiter=config.maxiter,
-            verbose=3,
-            copy=True,
-            ftol=config.ftol,
-            xtol=config.xtol,
-            gtol=config.gtol,
-            options=config.optimize_options,
-        )
-        eq_family.append(eq_new)
+        try:
+            eq_new, result = eq_family[-1].optimize(
+                objective=objective,
+                constraints=constraints,
+                optimizer=optimizer,
+                maxiter=config.maxiter,
+                verbose=3,
+                copy=True,
+                ftol=config.ftol,
+                xtol=config.xtol,
+                gtol=config.gtol,
+                options=config.optimize_options,
+            )
+            eq_family.append(eq_new)
+            stage_path = os.path.join(
+                paths.output_dir,
+                f"stage_{stage_index:02d}_mode_{int(max_mode)}.h5",
+            )
+            eq_new.save(stage_path)
+            stage_summary.update(
+                {
+                    "status": "completed",
+                    "elapsed_seconds": time.monotonic() - stage_start,
+                    "equilibrium_path": stage_path,
+                    "optimizer_result": summarize_optimizer_result(result),
+                }
+            )
+            stage_summaries.append(stage_summary)
+        except Exception as exc:
+            stage_summary.update(
+                {
+                    "status": "failed",
+                    "elapsed_seconds": time.monotonic() - stage_start,
+                    "failure_reason": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            stage_summaries.append(stage_summary)
+            with open(
+                os.path.join(paths.output_dir, "continuation_stages.json"),
+                "w",
+                encoding="ascii",
+            ) as stream:
+                json.dump(stage_summaries, stream, indent=2, sort_keys=True)
+                stream.write("\n")
+            raise
+        with open(
+            os.path.join(paths.output_dir, "continuation_stages.json"),
+            "w",
+            encoding="ascii",
+        ) as stream:
+            json.dump(stage_summaries, stream, indent=2, sort_keys=True)
+            stream.write("\n")
 
     eq_family[-1].save(paths.final_eq_path)
     return eq_family
