@@ -1,0 +1,3 @@
+module unload cudatoolkit
+module load python
+conda activate ti_optimization
