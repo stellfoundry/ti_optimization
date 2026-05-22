@@ -1,17 +1,18 @@
 """Combined QS + turbulence optimization of a quasi-axisymmetric stellarator.
 
 Starts from the precise_QA equilibrium and optimizes QuasisymmetryTwoTerm +
-direct GX turbulent heat flux + AspectRatio simultaneously using
-proximal-lsq-exact, progressively freeing more boundary modes. Saves initial
-and final equilibria as .h5 and generates a before/after flux surface
+either direct GX turbulent heat flux or NNITGProxy + AspectRatio simultaneously
+using proximal-lsq-exact, progressively freeing more boundary modes. Saves
+initial and final equilibria as .h5 and generates a before/after flux surface
 comparison plot.
 """
 
+import argparse
 import os
 from pathlib import Path
 
 # important to run GX on GPU without running out of memory
-os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+os.environ.setdefault("XLA_PYTHON_CLIENT_ALLOCATOR", "platform")
 
 from desc import set_device
 
@@ -36,6 +37,7 @@ from desc.objectives import (
     FixPsi,
     ForceBalance,
     GoodCoordinates,
+    NNITGProxy,
     ObjectiveFunction,
     PrincipalCurvature,
     QuasisymmetryTwoTerm,
@@ -62,8 +64,89 @@ GX_LAUNCH = Path(os.environ.get("TI_OPT_GX_LAUNCH", GX_LAUNCH_DEFAULT)).resolve(
 # a prefix command for the child process.
 LAUNCH_CMD = [str(GX_LAUNCH)] if GX_LAUNCH.is_file() else None
 
+DATA_DIR = REPO_ROOT / "data" / "neural_networks"
+MODEL_DIR = DATA_DIR / "cyclic_invariant_models"
+MODEL_CSV = DATA_DIR / "deephyper_exp" / "results.csv"
+
 OUTPUT_DIR = SCRIPT_DIR / "output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Optimize precise_QA with QS, aspect ratio, and turbulence."
+    )
+    parser.add_argument(
+        "--turbulence-objective",
+        default=os.environ.get("TI_OPT_TURBULENCE_OBJECTIVE", "gx"),
+        help=(
+            "Turbulence objective to use: 'gx' for direct GX, or 'nnitgproxy' "
+            "for the neural-network surrogate. Can also be set with "
+            "TI_OPT_TURBULENCE_OBJECTIVE."
+        ),
+    )
+    args = parser.parse_args()
+    aliases = {
+        "gx": "gx",
+        "direct_gx": "gx",
+        "normal_gx": "gx",
+        "nn": "nnitgproxy",
+        "nnitgproxy": "nnitgproxy",
+        "nn_itg_proxy": "nnitgproxy",
+        "surrogate": "nnitgproxy",
+    }
+    key = args.turbulence_objective.strip().lower()
+    if key not in aliases:
+        parser.error(
+            "--turbulence-objective must be one of: gx, nnitgproxy "
+            "(aliases: direct_gx, normal_gx, nn, nn_itg_proxy, surrogate)"
+        )
+    args.turbulence_objective = aliases[key]
+    return args
+
+
+def build_turbulence_objective(eq, turbulence_objective, weight):
+    if turbulence_objective == "gx":
+        return GX(
+            eq,
+            weight=weight,
+            abs_step=1e-4,
+            rel_step=0,
+            processes=1,
+            path=str(GX_PATH),
+            npol=1,
+            nzgrid=48,
+            alpha=gx_alpha,
+            psi=gx_psi,
+            sigma_Bxy=-1.0,
+            # Template GX input file. DESC patches geo_option to "eik" and
+            # replaces geo_file with the generated geometry path per run.
+            gx_input_file=str(GX_INPUT_FILE),
+            launch_cmd=LAUNCH_CMD,
+            gx_gpu=None,
+            timeout=600,
+            tmp_dir="tmp_GX",
+            save_tmp=False,
+            name="GX",
+            **{"exec": GX_EXEC}
+        )
+
+    return NNITGProxy(
+        eq=eq,
+        rho=np.array([np.sqrt(gx_psi)]),
+        alpha=np.array([gx_alpha]),
+        weight=weight,
+        ensemble_dir=str(MODEL_DIR),
+        ensemble_csv=str(MODEL_CSV),
+        n_ensemble=1,
+        target_flux_tube_length=75.4,
+        a_over_LT=3.0,
+        a_over_Ln=1.0,
+    )
+
+
+args = parse_args()
+print("Using turbulence objective: {}".format(args.turbulence_objective))
 
 # load and rescale starting equilibrium
 eq = get("precise_QA")
@@ -87,28 +170,10 @@ for n in range(2, 3):
                 eq=eqfam[-1], helicity=(1, 0), grid=qs_grid,
                 normalize=False, weight=0.1,
             ),
-            GX(
-                eqfam[-1],
+            build_turbulence_objective(
+                eq=eqfam[-1],
+                turbulence_objective=args.turbulence_objective,
                 weight=0.1,
-                abs_step=1e-4,
-                rel_step=0,
-                processes=1,
-                path=str(GX_PATH),
-                npol=1,
-                nzgrid=48,
-                alpha=gx_alpha,
-                psi=gx_psi,
-                sigma_Bxy=-1.0,
-                # Template GX input file. DESC patches geo_option to "eik" and
-                # replaces geo_file with the generated geometry path per run.
-                gx_input_file=str(GX_INPUT_FILE),
-                launch_cmd=LAUNCH_CMD,
-                gx_gpu=None,
-                timeout=600,
-                tmp_dir="tmp_GX",
-                save_tmp=False,
-                name="GX",
-                **{"exec": GX_EXEC}
             ),
             AspectRatio(
                 eq=eqfam[-1], target=6.0, weight=1.0 / 6.0,

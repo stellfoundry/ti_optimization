@@ -21,8 +21,10 @@ export TI_OPT_GX_DIR="${TI_OPT_GX_DIR:-${REPO_ROOT}/gx}"
 export TI_OPT_GX_EXEC="${TI_OPT_GX_EXEC:-gx}"
 export TI_OPT_GX_INPUT_FILE="${TI_OPT_GX_INPUT_FILE:-${SCRIPT_DIR}/gx.in}"
 export TI_OPT_GX_LAUNCH="${TI_OPT_GX_LAUNCH:-${SCRIPT_DIR}/gx-launch.sh}"
+export TI_OPT_TURBULENCE_OBJECTIVE="${TI_OPT_TURBULENCE_OBJECTIVE:-gx}"
 
 # Keep JAX from preallocating GPU memory that GX needs.
 export XLA_PYTHON_CLIENT_ALLOCATOR="${XLA_PYTHON_CLIENT_ALLOCATOR:-platform}"
 
-srun python3 -u "${SCRIPT_DIR}/qs_gx_turbulence_opt.py"
+srun python3 -u "${SCRIPT_DIR}/qs_gx_turbulence_opt.py" \
+    --turbulence-objective "${TI_OPT_TURBULENCE_OBJECTIVE}"
