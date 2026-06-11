@@ -1,0 +1,271 @@
+import os
+import time
+from pathlib import Path
+
+import numpy as np
+
+os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+
+from desc import set_device
+
+set_device("gpu")
+
+from desc.examples import get
+from desc.external.gx import GX
+from desc.objectives import NNITGProxy
+
+from expensive_eval_modules import (
+    evaluate_if_needed,
+    flatten_selected_params,
+    load_DB_safely,
+)
+
+
+def copy_selected_params(params_dict, param_names):
+    return {name: np.array(params_dict[name], copy=True) for name in param_names}
+
+
+def set_selected_params_on_eq(eq, x, param_names, shapes, sizes):
+    x = np.asarray(x, dtype=float).ravel()
+
+    expected_size = sum(sizes[name] for name in param_names)
+    if x.size != expected_size:
+        raise ValueError(
+            f"Expected x.size={expected_size} for param_names={param_names}, "
+            f"but got x.size={x.size}."
+        )
+
+    offset = 0
+    for name in param_names:
+        size = sizes[name]
+        old = np.array(eq.params_dict[name], copy=True)
+
+        new_value = x[offset : offset + size].reshape(shapes[name])
+        eq.params_dict[name] = new_value
+
+        print(f"Updated eq.params_dict[{name!r}]", flush=True)
+        print(f"  old shape = {old.shape}", flush=True)
+        print(f"  new shape = {new_value.shape}", flush=True)
+        print(f"  old first = {old.ravel()[:min(5, old.size)]}", flush=True)
+        print(f"  new first = {new_value.ravel()[:min(5, new_value.size)]}", flush=True)
+
+        offset += size
+
+    return eq
+
+
+def build_turbulence_objective(
+    eq,
+    *,
+    turbulence_objective,
+    gx_path,
+    gx_exec,
+    gx_input_file,
+    launch_cmd,
+    model_dir,
+    model_csv,
+):
+    gx_psi = 0.5
+    gx_alpha = 0.0
+
+    if turbulence_objective == "gx":
+        return GX(
+            eq,
+            abs_step=1e-4,
+            rel_step=0,
+            processes=1,
+            path=str(gx_path),
+            npol=1,
+            nzgrid=48,
+            alpha=gx_alpha,
+            psi=gx_psi,
+            sigma_Bxy=-1.0,
+            gx_input_file=str(gx_input_file),
+            launch_cmd=launch_cmd,
+            gx_gpu=None,
+            timeout=600,
+            tmp_dir="tmp_GX",
+            save_tmp=False,
+            name="GX",
+            **{"exec": gx_exec},
+        )
+
+    if turbulence_objective == "nnitgproxy":
+        return NNITGProxy(
+            eq=eq,
+            rho=np.array([np.sqrt(gx_psi)]),
+            alpha=np.array([gx_alpha]),
+            weight=1.0,
+            ensemble_dir=str(model_dir),
+            ensemble_csv=str(model_csv),
+            n_ensemble=1,
+            target_flux_tube_length=75.4,
+            a_over_LT=3.0,
+            a_over_Ln=1.0,
+        )
+
+    raise ValueError(
+        f"Unknown turbulence_objective={turbulence_objective!r}. "
+        "Use 'gx' or 'nnitgproxy'."
+    )
+
+
+def evaluate_at_params(
+    x,
+    *,
+    param_names,
+    turbulence_objective,
+    gx_path,
+    gx_exec,
+    gx_input_file,
+    launch_cmd,
+    model_dir,
+    model_csv,
+):
+    eq = get("precise_qa")
+
+    x0, shapes, sizes = flatten_selected_params(eq, param_names)
+    x = np.asarray(x, dtype=float).ravel()
+
+    base_params = copy_selected_params(eq.params_dict, param_names)
+
+    print(f"Nominal x0 = {x0}", flush=True)
+    print(f"Input x    = {x}", flush=True)
+
+    eq = set_selected_params_on_eq(eq, x, param_names, shapes, sizes)
+    updated_params = copy_selected_params(eq.params_dict, param_names)
+
+    obj = build_turbulence_objective(
+        eq,
+        turbulence_objective=turbulence_objective,
+        gx_path=gx_path,
+        gx_exec=gx_exec,
+        gx_input_file=gx_input_file,
+        launch_cmd=launch_cmd,
+        model_dir=model_dir,
+        model_csv=model_csv,
+    )
+
+    obj.build()
+
+    t0 = time.time()
+    f = obj.compute(eq.params_dict)
+    elapsed = time.time() - t0
+
+    value = float(np.ravel(f)[0])
+    metadata = {
+        "elapsed_sec": elapsed,
+        "success": True,
+        "turbulence_objective": turbulence_objective,
+        "param_names": param_names,
+        "x": x.copy(),
+        "nominal_x0": x0.copy(),
+        "base_params": base_params,
+        "updated_params": updated_params,
+    }
+    calc_status = 0
+
+    print(
+        f"Evaluated {turbulence_objective} f = {value:.16e} "
+        f"in {elapsed:.2f} sec",
+        flush=True,
+    )
+    return value, metadata, calc_status
+
+
+def main():
+    repo_root = Path(__file__).resolve().parents[1]
+    script_dir = Path(__file__).resolve().parent
+
+    gx_path = Path(os.environ.get("TI_OPT_GX_DIR", repo_root / "gx")).resolve()
+    gx_exec = os.environ.get("TI_OPT_GX_EXEC", "gx")
+    gx_input_file = Path(
+        os.environ.get("TI_OPT_GX_INPUT_FILE", script_dir / "gx.in")
+    ).resolve()
+    gx_launch = Path(
+        os.environ.get("TI_OPT_GX_LAUNCH", script_dir / "gx-launch.sh")
+    ).resolve()
+    launch_cmd = [str(gx_launch)] if gx_launch.is_file() else None
+
+    data_dir = repo_root / "data" / "neural_networks"
+    model_dir = data_dir / "cyclic_invariant_models"
+    model_csv = data_dir / "deephyper_exp" / "results.csv"
+
+    # Switch here: "gx" for full GX, "nnitgproxy" for NN surrogate.
+    turbulence_objective = "nnitgproxy"
+    # turbulence_objective = "gx"
+
+    database_name = (
+        f"/pscratch/sd/j/jmlarson/"
+        f"desc_{turbulence_objective}_param_sample_psi.npy"
+    )
+
+    # Absolute-value parameterization:
+    # x contains the actual values to write into eq.params_dict, in flattened order.
+    param_names = ["Psi"]
+
+    sample_points = [
+        np.array([0.087]),
+        np.array([0.086]),
+        np.array([0.088]),
+    ]
+
+    print(f"database_name        = {database_name}", flush=True)
+    print(f"turbulence_objective = {turbulence_objective}", flush=True)
+    print(f"param_names          = {param_names}", flush=True)
+    print(f"gx_path              = {gx_path}", flush=True)
+    print(f"gx_exec              = {gx_exec}", flush=True)
+    print(f"gx_input_file        = {gx_input_file}", flush=True)
+    print(f"gx_launch            = {gx_launch}", flush=True)
+    print(f"launch_cmd           = {launch_cmd}", flush=True)
+    print(f"model_dir            = {model_dir}", flush=True)
+    print(f"model_csv            = {model_csv}", flush=True)
+
+    def expensive_eval(x):
+        try:
+            return evaluate_at_params(
+                x,
+                param_names=param_names,
+                turbulence_objective=turbulence_objective,
+                gx_path=gx_path,
+                gx_exec=gx_exec,
+                gx_input_file=gx_input_file,
+                launch_cmd=launch_cmd,
+                model_dir=model_dir,
+                model_csv=model_csv,
+            )
+        except Exception as e:
+            value = np.nan
+            metadata = {
+                "elapsed_sec": np.nan,
+                "success": False,
+                "error": repr(e),
+                "turbulence_objective": turbulence_objective,
+                "param_names": param_names,
+                "x": np.asarray(x, dtype=float).ravel().copy(),
+            }
+            calc_status = 1
+            print(f"Evaluation failed: {repr(e)}", flush=True)
+            return value, metadata, calc_status
+
+    for k, x in enumerate(sample_points):
+        x = np.asarray(x, dtype=float).ravel()
+
+        print("=" * 80, flush=True)
+        print(f"Sample {k} of {len(sample_points) - 1}", flush=True)
+        print(f"x = {x}", flush=True)
+
+        entry, did_eval = evaluate_if_needed(database_name, x, expensive_eval)
+
+        print(f"did_eval    = {did_eval}", flush=True)
+        print(f"calc_status = {entry['calc_status']}", flush=True)
+        print(f"values      = {entry['values']}", flush=True)
+        print(f"metadata keys = {list(entry['metadata'].keys())}", flush=True)
+
+    DB = load_DB_safely(database_name)
+    print("=" * 80, flush=True)
+    print(f"Database now has {len(DB)} entries.", flush=True)
+
+
+if __name__ == "__main__":
+    main()
