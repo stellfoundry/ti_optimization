@@ -10,6 +10,8 @@ export TI_OPT_GX_EXEC=gx
 export TI_OPT_GX_INPUT_FILE=${TI_OPT_PHASE1}/gx.in
 export TI_OPT_GX_LAUNCH=${TI_OPT_PHASE1}/gx-launch.sh
 
+export TI_OPT_NN_DATA_DIR=/global/cfs/cdirs/m4505/rchurchi/ti_optimization/data/neural_networks
+
 # Conda environment
 module load python
 

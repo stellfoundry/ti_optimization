@@ -25,7 +25,7 @@ def copy_selected_params(params_dict, param_names):
     return {name: np.array(params_dict[name], copy=True) for name in param_names}
 
 
-def set_selected_params_on_eq(eq, x, param_names, shapes, sizes):
+def set_selected_params_on_eq(eq, x, param_names, shapes, sizes, *, solve_eq=True, solve_kwargs=None):
     x = np.asarray(x, dtype=float).ravel()
 
     expected_size = sum(sizes[name] for name in param_names)
@@ -38,20 +38,44 @@ def set_selected_params_on_eq(eq, x, param_names, shapes, sizes):
     offset = 0
     for name in param_names:
         size = sizes[name]
-        old = np.array(eq.params_dict[name], copy=True)
 
-        new_value = x[offset : offset + size].reshape(shapes[name])
-        eq.params_dict[name] = new_value
+        old_raw = getattr(eq, name)
+        old_arr = np.asarray(old_raw)
 
-        print(f"Updated eq.params_dict[{name!r}]", flush=True)
-        print(f"  old shape = {old.shape}", flush=True)
-        print(f"  new shape = {new_value.shape}", flush=True)
-        print(f"  old first = {old.ravel()[:min(5, old.size)]}", flush=True)
-        print(f"  new first = {new_value.ravel()[:min(5, new_value.size)]}", flush=True)
+        if old_arr.shape == ():
+            new_value = float(x[offset])
+        else:
+            new_value = x[offset : offset + size].reshape(old_arr.shape)
+
+        setattr(eq, name, new_value)
+
+        new_arr = np.asarray(new_value)
+        check = np.asarray(getattr(eq, name))
+
+        print(f"Updated eq.{name}", flush=True)
+        print(f"  old shape   = {old_arr.shape}", flush=True)
+        print(f"  new shape   = {new_arr.shape}", flush=True)
+        print(f"  check shape = {check.shape}", flush=True)
+        print(f"  old first   = {old_arr.ravel()[:min(5, old_arr.size)]}", flush=True)
+        print(f"  new first   = {new_arr.ravel()[:min(5, new_arr.size)]}", flush=True)
+        print(f"  check first = {check.ravel()[:min(5, check.size)]}", flush=True)
 
         offset += size
 
-    return eq
+    solve_info = None
+    if solve_eq:
+        solve_kwargs = {} if solve_kwargs is None else dict(solve_kwargs)
+        solve_kwargs.setdefault("ftol", 1e-3)
+        solve_kwargs.setdefault("maxiter", 300)
+        solve_kwargs.setdefault("verbose", 3)
+        solve_kwargs.setdefault("copy", True)
+
+        print("Solving equilibrium after parameter update...", flush=True)
+        eq, solve_info = eq.solve(**solve_kwargs)
+        print("Finished equilibrium solve.", flush=True)
+
+    return eq, solve_info
+
 
 
 def build_turbulence_objective(
@@ -132,7 +156,15 @@ def evaluate_at_params(
     print(f"Nominal x0 = {x0}", flush=True)
     print(f"Input x    = {x}", flush=True)
 
-    eq = set_selected_params_on_eq(eq, x, param_names, shapes, sizes)
+    eq, solve_info = set_selected_params_on_eq(
+        eq,
+        x,
+        param_names,
+        shapes,
+        sizes,
+        solve_eq=True,
+        solve_kwargs={"ftol": 1e-3, "maxiter": 300, "verbose": 3, "copy": True},
+    )
     updated_params = copy_selected_params(eq.params_dict, param_names)
 
     obj = build_turbulence_objective(
@@ -162,6 +194,7 @@ def evaluate_at_params(
         "nominal_x0": x0.copy(),
         "base_params": base_params,
         "updated_params": updated_params,
+        "solve_info": solve_info,
     }
     calc_status = 0
 
@@ -187,7 +220,12 @@ def main():
     ).resolve()
     launch_cmd = [str(gx_launch)] if gx_launch.is_file() else None
 
-    data_dir = repo_root / "data" / "neural_networks"
+    data_dir = Path(
+        os.environ.get(
+            "TI_OPT_NN_DATA_DIR",
+            "/global/cfs/cdirs/m4505/rchurchi/ti_optimization/data/neural_networks",
+        )
+    ).resolve()
     model_dir = data_dir / "cyclic_invariant_models"
     model_csv = data_dir / "deephyper_exp" / "results.csv"
 
@@ -235,6 +273,8 @@ def main():
                 model_csv=model_csv,
             )
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             value = np.nan
             metadata = {
                 "elapsed_sec": np.nan,
