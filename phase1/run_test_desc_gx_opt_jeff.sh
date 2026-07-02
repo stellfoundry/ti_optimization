@@ -39,4 +39,5 @@ test -f "$TI_OPT_GX_INPUT_FILE"
 test -f "$TI_OPT_GX_LAUNCH"
 
 # srun python3 -u "${SCRIPT_DIR}/test_desc_gx_opt.py"
-srun python3 -u "${SCRIPT_DIR}/sample_desc_gx_params_db.py"
+# srun python3 -u "${SCRIPT_DIR}/sample_desc_gx_params_db.py"
+srun python3 -u "${SCRIPT_DIR}/sample_desc_gx_params_db_2.py"
