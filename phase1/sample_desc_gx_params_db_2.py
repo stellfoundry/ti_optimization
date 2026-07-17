@@ -82,7 +82,7 @@ def make_boundary_mode_sample_points(eq, param_names, *, dx0=1e-4, dx1=1e-4):
     return sample_points, selected_entries, selected_flat_indices, x0
 
 
-def set_selected_params_on_eq(eq, x, param_names, shapes, sizes, *, solve_eq=True, solve_kwargs=None):
+def set_selected_params_on_eq(eq, x, param_names, shapes, sizes, *, solve_eq=True, solve_kwargs=None, uid=""):
     x = np.asarray(x, dtype=float).ravel()
 
     expected_size = sum(sizes[name] for name in param_names)
@@ -129,6 +129,7 @@ def set_selected_params_on_eq(eq, x, param_names, shapes, sizes, *, solve_eq=Tru
 
         print("Solving equilibrium after parameter update...", flush=True)
         eq, solve_info = eq.solve(**solve_kwargs)
+        eq.save(f"precise_qa_{uid}.h5")
         print("Finished equilibrium solve.", flush=True)
 
     return eq, solve_info
@@ -145,6 +146,7 @@ def build_turbulence_objective(
     launch_cmd,
     model_dir,
     model_csv,
+    uid="",
 ):
     gx_psi = 0.5
     gx_alpha = 0.0
@@ -165,8 +167,8 @@ def build_turbulence_objective(
             launch_cmd=launch_cmd,
             gx_gpu=None,
             timeout=600,
-            tmp_dir="tmp_GX",
-            save_tmp=False,
+            tmp_dir=f"tmp_GX_{uid}",
+            save_tmp=True,
             name="GX",
             **{"exec": gx_exec},
         )
@@ -208,6 +210,16 @@ def evaluate_at_params(
     x0, shapes, sizes = flatten_selected_params(eq, param_names)
     x = np.asarray(x, dtype=float).ravel()
 
+    # Unique identifier based on the perturbation of the two adjusted values.
+    selected_entries = get_boundary_mode_entries(eq)
+    selected_flat_indices = [
+        flattened_index_for_entry(param_names, sizes, entry)
+        for entry in selected_entries
+    ]
+    d0 = float(x[selected_flat_indices[0]] - x0[selected_flat_indices[0]])
+    d1 = float(x[selected_flat_indices[1]] - x0[selected_flat_indices[1]])
+    uid = f"dx0_{d0:.3e}_dx1_{d1:.3e}"
+
     base_params = copy_selected_params(eq.params_dict, param_names)
 
     print(f"Nominal x0 = {x0}", flush=True)
@@ -221,6 +233,7 @@ def evaluate_at_params(
         sizes,
         solve_eq=True,
         solve_kwargs={"ftol": 1e-3, "maxiter": 300, "verbose": 3, "copy": True},
+        uid=uid,
     )
     updated_params = copy_selected_params(eq.params_dict, param_names)
 
@@ -233,6 +246,7 @@ def evaluate_at_params(
         launch_cmd=launch_cmd,
         model_dir=model_dir,
         model_csv=model_csv,
+        uid=uid,
     )
 
     obj.build()
@@ -322,12 +336,22 @@ def main():
 
     sample_points = []
 
-    for value0 in grid0:
-        for value1 in grid1:
-            x = x0_tmp.copy()
-            x[selected_flat_indices[0]] = value0
-            x[selected_flat_indices[1]] = value1
-            sample_points.append(x)
+    # for value0 in grid0:
+    #     for value1 in grid1:
+    #         x = x0_tmp.copy()
+    #         x[selected_flat_indices[0]] = value0
+    #         x[selected_flat_indices[1]] = value1
+    #         sample_points.append(x)
+
+    # Zero-perturbation case:
+    x = x0_tmp.copy()
+    sample_points.append(x)
+
+    # Top-right corner (both parameters at their largest perturbation):
+    x = x0_tmp.copy()
+    x[selected_flat_indices[0]] = x_selected0[0] + half_width0
+    x[selected_flat_indices[1]] = x_selected0[1] + half_width1
+    sample_points.append(x)
 
     print(f"Generated {len(sample_points)} grid samples.", flush=True)
 
