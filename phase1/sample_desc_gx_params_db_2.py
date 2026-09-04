@@ -17,8 +17,16 @@ from desc.objectives import NNITGProxy
 from expensive_eval_modules import (
     evaluate_if_needed,
     flatten_selected_params,
+    fsa_grad_x_from_desc,
     load_DB_safely,
+    solve_npol_for_target_length,
 )
+
+# Flux-surface / field-line location used throughout this study, and the
+# flux-tube length NNITGProxy's target_flux_tube_length assumes GX also uses.
+GX_PSI = 0.5
+GX_ALPHA = 0.0
+TARGET_FLUX_TUBE_LENGTH = 75.4
 
 
 def copy_selected_params(params_dict, param_names):
@@ -148,17 +156,25 @@ def build_turbulence_objective(
     model_csv,
     uid="",
 ):
-    gx_psi = 0.5
-    gx_alpha = 0.0
+    gx_psi = GX_PSI
+    gx_alpha = GX_ALPHA
 
     if turbulence_objective == "gx":
+        npol = solve_npol_for_target_length(
+            eq, psi=gx_psi, alpha=gx_alpha, target_length=TARGET_FLUX_TUBE_LENGTH
+        )
+        print(
+            f"Solved npol={npol:.6f} for target_flux_tube_length="
+            f"{TARGET_FLUX_TUBE_LENGTH}",
+            flush=True,
+        )
         return GX(
             eq,
             abs_step=1e-4,
             rel_step=0,
             processes=1,
             path=str(gx_path),
-            npol=1,
+            npol=npol,
             nzgrid=48,
             alpha=gx_alpha,
             psi=gx_psi,
@@ -182,7 +198,7 @@ def build_turbulence_objective(
             ensemble_dir=str(model_dir),
             ensemble_csv=str(model_csv),
             n_ensemble=1,
-            target_flux_tube_length=75.4,
+            target_flux_tube_length=TARGET_FLUX_TUBE_LENGTH,
             a_over_LT=3.0,
             a_over_Ln=1.0,
         )
@@ -267,6 +283,22 @@ def evaluate_at_params(
         "updated_params": updated_params,
         "solve_info": solve_info,
     }
+
+    if turbulence_objective == "nnitgproxy":
+        # NNITGProxy is trained on GX flux with the <grad(x)> factor divided
+        # out. Its raw output must be multiplied back by that factor to
+        # be comparable to GX's raw output (ask Churchill).
+        raw_value = value
+        grad_x_factor = fsa_grad_x_from_desc(eq, s=GX_PSI)
+        value = raw_value * grad_x_factor
+        metadata["nnitgproxy_raw_value"] = raw_value
+        metadata["grad_x_factor"] = grad_x_factor
+        print(
+            f"Applied grad_x correction: raw={raw_value:.6e} "
+            f"* factor={grad_x_factor:.6e} -> corrected={value:.6e}",
+            flush=True,
+        )
+
     calc_status = 0
 
     print(
