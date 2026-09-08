@@ -197,10 +197,11 @@ def build_turbulence_objective(
             weight=1.0,
             ensemble_dir=str(model_dir),
             ensemble_csv=str(model_csv),
-            n_ensemble=1,
+            n_ensemble=100,
             target_flux_tube_length=TARGET_FLUX_TUBE_LENGTH,
             a_over_LT=3.0,
-            a_over_Ln=1.0,
+            # Matches gx.in's fprim = [0.9, 0.0] (ion density gradient).
+            a_over_Ln=0.9,
         )
 
     raise ValueError(
@@ -285,17 +286,18 @@ def evaluate_at_params(
     }
 
     if turbulence_objective == "nnitgproxy":
-        # NNITGProxy is trained on GX flux with the <grad(x)> factor divided
-        # out. Its raw output must be multiplied back by that factor to
-        # be comparable to GX's raw output (ask Churchill).
+        # NNITGProxy ~= Q_GX * <|grad(rho)|>, i.e. its raw output is in GX's
+        # convention multiplied by the <grad(x)> factor. To recover Q_GX for
+        # an apples-to-apples comparison, divide by that factor (not
+        # multiply (ask Churchill)
         raw_value = value
         grad_x_factor = fsa_grad_x_from_desc(eq, s=GX_PSI)
-        value = raw_value * grad_x_factor
+        value = raw_value / grad_x_factor
         metadata["nnitgproxy_raw_value"] = raw_value
         metadata["grad_x_factor"] = grad_x_factor
         print(
             f"Applied grad_x correction: raw={raw_value:.6e} "
-            f"* factor={grad_x_factor:.6e} -> corrected={value:.6e}",
+            f"/ factor={grad_x_factor:.6e} -> corrected={value:.6e}",
             flush=True,
         )
 
