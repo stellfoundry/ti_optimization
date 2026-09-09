@@ -58,6 +58,7 @@ def _build_proxy(
     rho: np.ndarray | None = None,
     alpha: np.ndarray | None = None,
     a_over_LT_grid: np.ndarray | None = None,
+    n_ensemble: int = 1,
 ) -> NNCriticalGradientProxy:
     rho = DEFAULT_RHO if rho is None else np.asarray(rho, dtype=float)
     alpha = DEFAULT_ALPHA if alpha is None else np.asarray(alpha, dtype=float)
@@ -74,7 +75,7 @@ def _build_proxy(
         alpha=alpha,
         ensemble_dir=str(MODEL_DIR),
         ensemble_csv=str(MODEL_CSV),
-        n_ensemble=1,
+        n_ensemble=n_ensemble,
         target_flux_tube_length=75.4,
         a_over_Ln=0.9,
         a_over_LT_grid=a_over_LT_grid,
@@ -180,6 +181,41 @@ def test_phase3_analysis_critical_gradient_bounds():
     assert np.isfinite(critical).all()
     assert np.all(critical >= a_over_LT_grid[0] - 1e-8)
     assert np.all(critical <= a_over_LT_grid[-1] + 1e-8)
+
+
+def test_phase3_analysis_ensemble_critical_gradient_shape():
+    """Check that analysis can return per-model critical-gradient estimates."""
+    pytest.importorskip("torch")
+    if not MODEL_DIR.exists():
+        pytest.skip(f"Missing model directory: {MODEL_DIR}")
+    if not MODEL_CSV.exists():
+        pytest.skip(f"Missing model csv: {MODEL_CSV}")
+
+    rho = np.array([np.sqrt(0.5)], dtype=float)
+    alpha = np.array([0.0, np.pi / 2.0], dtype=float)
+    a_over_LT_grid = np.linspace(0.5, 3.5, 4, dtype=float)
+    n_ensemble = 2
+    proxy = _build_proxy(
+        rho=rho,
+        alpha=alpha,
+        a_over_LT_grid=a_over_LT_grid,
+        n_ensemble=n_ensemble,
+    )
+    critical, ensemble_critical = proxy.compute(
+        proxy.things[0].params_dict,
+        constants=proxy.constants,
+        return_critical_gradient=True,
+        return_ensemble_critical_gradient=True,
+    )
+    critical.block_until_ready()
+    ensemble_critical.block_until_ready()
+    critical = np.asarray(critical)
+    ensemble_critical = np.asarray(ensemble_critical)
+
+    assert critical.shape == (rho.size,)
+    assert ensemble_critical.shape == (n_ensemble, rho.size)
+    assert np.isfinite(critical).all()
+    assert np.isfinite(ensemble_critical).all()
 
 
 def test_phase3_wrapped_objective_gradient_timing():

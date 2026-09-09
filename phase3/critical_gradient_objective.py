@@ -133,6 +133,7 @@ class NNCriticalGradientProxy(NNITGProxy):
         a_over_Ln,
         models,
         num_alpha,
+        return_ensemble=False,
     ):
         arclength_2d = compute_arclength_via_gradpar(gradpar_2d, theta_pest_offset)
         _, signals_resampled = resample_to_uniform_arclength(
@@ -158,8 +159,11 @@ class NNCriticalGradientProxy(NNITGProxy):
 
         predictions = [f(tiled_signals, tiled_scalars) for f in models]
         stacked = jnp.stack(predictions)
-        log_q = jnp.mean(stacked, axis=0)[:, 0].reshape(n_grid, num_alpha)
+        log_q_ensemble = stacked[:, :, 0].reshape(len(models), n_grid, num_alpha)
+        log_q = jnp.mean(log_q_ensemble, axis=0)
         q_sweep = jnp.exp(log_q)
+        if return_ensemble:
+            return q_sweep, signals_batch, jnp.exp(log_q_ensemble)
         return q_sweep, signals_batch
 
     def _optimization_penalty_from_sweep(
@@ -174,20 +178,25 @@ class NNCriticalGradientProxy(NNITGProxy):
         weighted_exceedance = jax.nn.softplus(scaled) * early_weight[:, None]
         return jnp.sum(weighted_exceedance, axis=0) / denom
 
-    def _critical_gradient_from_sweep(self, q_sweep, a_over_LT_grid, q_threshold, log_width):
+    def _critical_gradient_from_sweep(
+        self, q_sweep, a_over_LT_grid, q_threshold, log_width, scan_axis=0
+    ):
         # Keep the analysis-only critical-gradient estimate out of the reverse pass.
         scaled = jax.lax.stop_gradient(
             self._scaled_log_threshold_offset(q_sweep, q_threshold, log_width)
         )
         a_over_LT_grid = jnp.asarray(a_over_LT_grid, dtype=scaled.dtype)
-        proximity = jax.nn.softmax(-jnp.square(scaled), axis=0)
-        return jnp.sum(proximity * a_over_LT_grid[:, None], axis=0)
+        proximity = jax.nn.softmax(-jnp.square(scaled), axis=scan_axis)
+        grid_shape = [1] * scaled.ndim
+        grid_shape[scan_axis] = a_over_LT_grid.size
+        grid = a_over_LT_grid.reshape(tuple(grid_shape))
+        return jnp.sum(proximity * grid, axis=scan_axis)
 
-    def _aggregate_alpha(self, critical_per_alpha, alpha_aggregation):
+    def _aggregate_alpha(self, critical_per_alpha, alpha_aggregation, alpha_axis=-1):
         if alpha_aggregation == "mean":
-            return jnp.mean(critical_per_alpha)
+            return jnp.mean(critical_per_alpha, axis=alpha_axis)
         if alpha_aggregation == "worst":
-            return jnp.min(critical_per_alpha)
+            return jnp.min(critical_per_alpha, axis=alpha_axis)
         if alpha_aggregation == "separate":
             return critical_per_alpha
         raise ValueError(f"Unsupported alpha aggregation: {alpha_aggregation}")
@@ -201,7 +210,9 @@ class NNCriticalGradientProxy(NNITGProxy):
         return_critical_gradient,
         return_q_sweep,
         return_signals,
+        return_ensemble_critical_gradient,
         alpha_aggregation,
+        ensemble_critical_all=None,
     ):
         if alpha_aggregation == "separate":
             objective_stacked = jnp.stack(objective_all)
@@ -221,6 +232,11 @@ class NNCriticalGradientProxy(NNITGProxy):
             result.append(jnp.stack(q_sweeps))
         if return_signals:
             result.append(jnp.stack(all_signals))
+        if return_ensemble_critical_gradient:
+            ensemble_critical = jnp.stack(ensemble_critical_all)
+            # Present model as the leading axis: (n_models, n_rho[, n_alpha]).
+            ensemble_critical = jnp.moveaxis(ensemble_critical, 1, 0)
+            result.append(ensemble_critical)
         if len(result) == 1:
             return result[0]
         return tuple(result)
@@ -232,6 +248,7 @@ class NNCriticalGradientProxy(NNITGProxy):
         return_critical_gradient=False,
         return_q_sweep=False,
         return_signals=False,
+        return_ensemble_critical_gradient=False,
     ):
         if constants is None:
             constants = self.constants
@@ -293,6 +310,7 @@ class NNCriticalGradientProxy(NNITGProxy):
                 return_critical_gradient,
                 return_q_sweep,
                 return_signals,
+                return_ensemble_critical_gradient,
             )
 
         zeta_offset = jnp.linspace(-jnp.pi * toroidal_turns, jnp.pi * toroidal_turns, nz)
@@ -334,6 +352,7 @@ class NNCriticalGradientProxy(NNITGProxy):
         critical_all = [] if return_critical_gradient else None
         q_sweeps = [] if return_q_sweep else None
         all_signals = [] if return_signals else None
+        ensemble_critical_all = [] if return_ensemble_critical_gradient else None
 
         for i_rho in range(num_rho):
             gradpar_2d = gradpar_3d[:, i_rho, :]
@@ -344,7 +363,7 @@ class NNCriticalGradientProxy(NNITGProxy):
             signals_2d = signals_2d.at[5].multiply(iota_sign)
 
             theta_pest_offset_rho = iota_arr[i_rho] * zeta_offset
-            q_sweep, signals_batch = self._run_cnn_sweep_for_rho(
+            sweep_result = self._run_cnn_sweep_for_rho(
                 gradpar_2d,
                 signals_2d,
                 theta_pest_offset_rho,
@@ -352,7 +371,12 @@ class NNCriticalGradientProxy(NNITGProxy):
                 a_over_Ln,
                 models,
                 num_alpha,
+                return_ensemble=return_ensemble_critical_gradient,
             )
+            if return_ensemble_critical_gradient:
+                q_sweep, signals_batch, q_sweep_ensemble = sweep_result
+            else:
+                q_sweep, signals_batch = sweep_result
             objective_per_alpha = self._optimization_penalty_from_sweep(
                 q_sweep,
                 a_over_LT_grid,
@@ -370,6 +394,19 @@ class NNCriticalGradientProxy(NNITGProxy):
                 critical_all.append(
                     self._aggregate_alpha(critical_per_alpha, alpha_aggregation)
                 )
+            if return_ensemble_critical_gradient:
+                ensemble_critical_per_alpha = self._critical_gradient_from_sweep(
+                    q_sweep_ensemble,
+                    a_over_LT_grid,
+                    q_threshold,
+                    log_width,
+                    scan_axis=1,
+                )
+                ensemble_critical_all.append(
+                    self._aggregate_alpha(
+                        ensemble_critical_per_alpha, alpha_aggregation, alpha_axis=-1
+                    )
+                )
             if return_q_sweep:
                 q_sweeps.append(q_sweep)
             if return_signals:
@@ -383,7 +420,9 @@ class NNCriticalGradientProxy(NNITGProxy):
             return_critical_gradient,
             return_q_sweep,
             return_signals,
+            return_ensemble_critical_gradient,
             alpha_aggregation,
+            ensemble_critical_all=ensemble_critical_all,
         )
 
     def _compute_with_length_solving(
@@ -406,6 +445,7 @@ class NNCriticalGradientProxy(NNITGProxy):
         return_critical_gradient,
         return_q_sweep,
         return_signals,
+        return_ensemble_critical_gradient=False,
     ):
         num_rho = len(rho_arr)
         num_alpha = len(alpha_arr)
@@ -417,6 +457,7 @@ class NNCriticalGradientProxy(NNITGProxy):
         critical_all = [] if return_critical_gradient else None
         q_sweeps = [] if return_q_sweep else None
         all_signals = [] if return_signals else None
+        ensemble_critical_all = [] if return_ensemble_critical_gradient else None
 
         for i_rho in range(num_rho):
             rho = rho_arr[i_rho]
@@ -494,7 +535,7 @@ class NNCriticalGradientProxy(NNITGProxy):
 
             gradpar_2d = gx_data["gx_gradpar"].reshape(nz, num_alpha)
             signals_2d = jnp.stack([gx_data[k].reshape(nz, num_alpha) for k in gx_keys])
-            q_sweep, signals_batch = self._run_cnn_sweep_for_rho(
+            sweep_result = self._run_cnn_sweep_for_rho(
                 gradpar_2d,
                 signals_2d,
                 theta_pest_offset,
@@ -502,7 +543,12 @@ class NNCriticalGradientProxy(NNITGProxy):
                 a_over_Ln,
                 models,
                 num_alpha,
+                return_ensemble=return_ensemble_critical_gradient,
             )
+            if return_ensemble_critical_gradient:
+                q_sweep, signals_batch, q_sweep_ensemble = sweep_result
+            else:
+                q_sweep, signals_batch = sweep_result
             objective_per_alpha = self._optimization_penalty_from_sweep(
                 q_sweep,
                 a_over_LT_grid,
@@ -520,6 +566,19 @@ class NNCriticalGradientProxy(NNITGProxy):
                 critical_all.append(
                     self._aggregate_alpha(critical_per_alpha, alpha_aggregation)
                 )
+            if return_ensemble_critical_gradient:
+                ensemble_critical_per_alpha = self._critical_gradient_from_sweep(
+                    q_sweep_ensemble,
+                    a_over_LT_grid,
+                    q_threshold,
+                    log_width,
+                    scan_axis=1,
+                )
+                ensemble_critical_all.append(
+                    self._aggregate_alpha(
+                        ensemble_critical_per_alpha, alpha_aggregation, alpha_axis=-1
+                    )
+                )
             if return_q_sweep:
                 q_sweeps.append(q_sweep)
             if return_signals:
@@ -533,7 +592,9 @@ class NNCriticalGradientProxy(NNITGProxy):
             return_critical_gradient,
             return_q_sweep,
             return_signals,
+            return_ensemble_critical_gradient,
             alpha_aggregation,
+            ensemble_critical_all=ensemble_critical_all,
         )
 
 

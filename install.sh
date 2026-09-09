@@ -138,6 +138,11 @@ module --redirect list 2>/dev/null || module -t list 2>&1 || true
 cd "${GX_PATH}"
 make clean >/dev/null 2>&1 || true
 make -j "${GX_JOBS}"
+if ldd ./gx | grep -q "not found"; then
+  echo "GX build completed with unresolved shared libraries:" >&2
+  ldd ./gx | grep "not found" >&2
+  exit 1
+fi
 EOF
   then
     fail_install "GX build failed. The GX source was cloned to ${GX_DIR} for inspection."

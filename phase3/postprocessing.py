@@ -77,6 +77,40 @@ class CriticalGradientPostprocessor:
         crit = proxy.compute(eq.params_dict, return_critical_gradient=True)
         return np.asarray(crit, dtype=float)
 
+    def evaluate_critical_gradient_ensemble(
+        self, eq, *, rho, alpha, alpha_aggregation=None
+    ):
+        proxy = self._build_proxy(eq, rho, alpha, alpha_aggregation=alpha_aggregation)
+        crit, ensemble_crit = proxy.compute(
+            eq.params_dict,
+            return_critical_gradient=True,
+            return_ensemble_critical_gradient=True,
+        )
+        return np.asarray(crit, dtype=float), np.asarray(ensemble_crit, dtype=float)
+
+    def evaluate_critical_gradient_metric_uncertainty(
+        self, eq, *, rho, alpha, alpha_aggregation=None
+    ):
+        critical, ensemble_critical = self.evaluate_critical_gradient_ensemble(
+            eq, rho=rho, alpha=alpha, alpha_aggregation=alpha_aggregation
+        )
+        ensemble_flat = ensemble_critical.reshape(ensemble_critical.shape[0], -1)
+        ensemble_metric = np.mean(ensemble_flat, axis=1)
+        ddof = 1 if ensemble_metric.size > 1 else 0
+        return {
+            "critical_gradient": float(np.mean(np.asarray(critical, dtype=float))),
+            "critical_gradient_ensemble_mean": float(np.mean(ensemble_metric)),
+            "critical_gradient_ensemble_std": float(np.std(ensemble_metric, ddof=ddof)),
+            "critical_gradient_ensemble_sem": float(
+                np.std(ensemble_metric, ddof=ddof) / np.sqrt(max(ensemble_metric.size, 1))
+            ),
+            "critical_gradient_per_model": ensemble_metric.tolist(),
+            "critical_gradient_per_rho": np.asarray(critical, dtype=float).tolist(),
+            "critical_gradient_per_model_per_rho": np.asarray(
+                ensemble_critical, dtype=float
+            ).tolist(),
+        }
+
     def evaluate_q_sweep(self, eq, *, rho, alpha):
         proxy = self._build_proxy(eq, rho, alpha, alpha_aggregation="separate")
         crit, q_sweep = proxy.compute(
