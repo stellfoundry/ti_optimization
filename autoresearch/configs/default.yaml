@@ -1,0 +1,78 @@
+{
+  "campaign_id": "latest",
+  "max_generations": 100,
+  "population_size": 16,
+  "concurrency": 4,
+  "random_seed": 7,
+  "output_root": "autoresearch/output",
+  "families": ["phase3"],
+  "elite_fraction": 0.25,
+  "mutation_fraction": 0.65,
+  "random_fraction": 0.10,
+  "confirm_elites_with_analysis_n_ensemble": 3,
+  "gpu": {
+    "ids": [0, 1, 2, 3],
+    "one_process_per_gpu": true
+  },
+  "score": {
+    "weights": {
+      "turbulence": 1.0,
+      "critical_gradient": 1.0,
+      "quasisymmetry": 0.25,
+      "aspect_ratio": 0.25,
+      "runtime": 0.05,
+      "failure": 1000000.0
+    }
+  },
+  "search_space": {
+    "shared": {
+      "mode_steps": [
+        [1, 2, 3],
+        [1, 2],
+        [1, 2, 3, 4]
+      ],
+      "qs_weight": {"type": "loguniform", "low": 0.01, "high": 0.12},
+      "aspect_ratio_target": {"type": "choice", "values": [6.0, 7.0]},
+      "aspect_ratio_weight": {"type": "loguniform", "low": 0.03, "high": 0.5},
+      "initial_trust_radius": {"type": "loguniform", "low": 0.05, "high": 0.4},
+      "maxiter": {"type": "choice", "values": [500, 750, 1000]},
+      "ftol": {"type": "loguniform", "low": 1.0e-5, "high": 1.0e-3},
+      "xtol": {"type": "loguniform", "low": 1.0e-5, "high": 1.0e-3},
+      "gtol": {"type": "loguniform", "low": 1.0e-5, "high": 1.0e-3},
+      "rho": [
+        [0.124, 0.288, 0.453, 0.618],
+        [0.041, 0.124, 0.206, 0.288, 0.371, 0.453, 0.535, 0.618, 0.700]
+      ],
+      "alpha": [
+        [0.0],
+        [0.0, 1.5707963267948966],
+        [0.0, 0.7853981633974483, 1.5707963267948966, 2.356194490192345]
+      ],
+      "rho_scan_values": [
+        [0.124, 0.288, 0.453, 0.618],
+        [0.05, 0.124, 0.206, 0.288, 0.371, 0.453, 0.535, 0.618, 0.700]
+      ],
+      "gradient_scan_values": [
+        [0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 10.0],
+        [0.25, 0.75, 1.25, 2.0, 3.0, 4.5, 6.0, 8.0, 10.0]
+      ]
+    },
+    "phase2": {
+      "turbulence_weight": {"type": "loguniform", "low": 0.01, "high": 1.0},
+      "a_over_LT": {"type": "uniform", "low": 1.5, "high": 3.5},
+      "a_over_Ln": {"type": "uniform", "low": 0.3, "high": 1.0},
+      "target_flux_tube_length": {"type": "choice", "values": [50.0]}
+    },
+    "phase3": {
+      "critical_gradient_weight": {"type": "loguniform", "low": 0.05, "high": 1.0},
+      "a_over_Ln": {"type": "uniform", "low": 0.72, "high": 1.15},
+      "a_over_LT_grid": [
+        {"start": 0.5, "stop": 6.0, "num": 12},
+        {"start": 0.5, "stop": 10.0, "num": 20}
+      ],
+      "critical_q_threshold": {"type": "loguniform", "low": 0.9, "high": 1.6},
+      "critical_log_width": {"type": "uniform", "low": 0.25, "high": 0.6},
+      "alpha_aggregation": {"type": "choice", "values": ["worst"]}
+    }
+  }
+}
