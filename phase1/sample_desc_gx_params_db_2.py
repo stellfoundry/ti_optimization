@@ -370,22 +370,23 @@ def main():
 
     sample_points = []
 
-    # for value0 in grid0:
-    #     for value1 in grid1:
-    #         x = x0_tmp.copy()
-    #         x[selected_flat_indices[0]] = value0
-    #         x[selected_flat_indices[1]] = value1
-    #         sample_points.append(x)
+    # Full n_grid x n_grid grid around the nominal point, for a contour plot.
+    for value0 in grid0:
+        for value1 in grid1:
+            x = x0_tmp.copy()
+            x[selected_flat_indices[0]] = value0
+            x[selected_flat_indices[1]] = value1
+            sample_points.append(x)
 
-    # Zero-perturbation case:
-    x = x0_tmp.copy()
-    sample_points.append(x)
+    # # Zero-perturbation case:
+    # x = x0_tmp.copy()
+    # sample_points.append(x)
 
-    # Top-right corner (both parameters at their largest perturbation):
-    x = x0_tmp.copy()
-    x[selected_flat_indices[0]] = x_selected0[0] + half_width0
-    x[selected_flat_indices[1]] = x_selected0[1] + half_width1
-    sample_points.append(x)
+    # # Top-right corner (both parameters at their largest perturbation):
+    # x = x0_tmp.copy()
+    # x[selected_flat_indices[0]] = x_selected0[0] + half_width0
+    # x[selected_flat_indices[1]] = x_selected0[1] + half_width1
+    # sample_points.append(x)
 
     print(f"Generated {len(sample_points)} grid samples.", flush=True)
 
